@@ -109,6 +109,17 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
         )
       )
 
+    val stateProto =
+      tag(qname("response"),
+        tag(qname("result"),
+          tag(qname("doc"),
+            option(
+              tag(qname("str"), body).having(attribute("name"), "state")
+            )
+          )
+        )
+      )
+
     def printSink[T]() = Sink.fold[Int, T](0) { (c, el) =>
       if (c % 50000 == 0) println(c, nowMillis - started)
       c + 1
@@ -128,8 +139,8 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
         import GraphDSL.Implicits._
 
         // prepare graph elements
-        val broadcast = b.add(Broadcast[XMLEvent](6))
-        val zip = b.add(ZipN[JOption[String]](6))
+        val broadcast = b.add(Broadcast[XMLEvent](7))
+        val zip = b.add(ZipN[JOption[String]](7))
 
         // connect the graph
         broadcast.out(0) ~> ProtocolReader.of(priceProto) ~> zip.in(0)
@@ -138,6 +149,7 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
         broadcast.out(3) ~> ProtocolReader.of(yearProto) ~> zip.in(3)
         broadcast.out(4) ~> ProtocolReader.of(lotSizeProto) ~> zip.in(4)
         broadcast.out(5) ~> ProtocolReader.of(bedsProto) ~> zip.in(5)
+        broadcast.out(6) ~> ProtocolReader.of(stateProto) ~> zip.in(6)
 
         // expose ports
         FlowShape(broadcast.in, zip.out)
@@ -148,9 +160,10 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
         .via(parserFlow)
         .mapConcat {
           case e if e.forall(_.isDefined) =>
-            Entity(e(0).get.toInt, e(1).get.toInt, e(2).get.toFloat, e(3).get.toInt, e(4).get.toFloat, e(5).get.toInt) :: Nil
+            Entity(e(0).get.toInt, e(1).get.toInt, e(2).get.toFloat, e(3).get.toInt, e(4).get.toFloat, e(5).get.toInt, e(6).get) :: Nil
           case e => Nil
         }
+        .groupBy(100, _.state)
         .map { entity =>
           if (entity.price > bnd.priceMax) {
             bnd = bnd.copy(priceMax = entity.price)
@@ -190,7 +203,8 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
           }
           entity
         }
-        .take(60000)
+        .mergeSubstreams
+        //.take(60000)
         .runWith(Sink.seq)
 
       val allrows = Await.result(parsed, Duration.Inf)
@@ -203,14 +217,26 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
             (entity.baths - bnd.bathsMin) / bnd.bathsMax,
             (entity.year - bnd.yearMin) / bnd.yearMax.toFloat,
             (entity.lotSize - bnd.lotSizeMin) / bnd.lotSizeMax,
-            (entity.beds - bnd.bedsMin) / bnd.bedsMax.toFloat
+            (entity.beds - bnd.bedsMin) / bnd.bedsMax.toFloat,
+            entity.state
           )
         }
+        .groupBy(100, _.state)
         .map { e =>
-          f"${e.price}%f;${e.footage}%f;${e.baths}%f;${e.year}%f;${e.lotSize}%f;${e.beds}%f\n"
+          (f"${e.price}%f;${e.footage}%f;${e.baths}%f;${e.year}%f;${e.lotSize}%f;${e.beds}%f", e.state)
         }
-        .map(ByteString.apply)
-        .runWith(FileIO.toPath(Paths.get("/home/martynas/Downloads/houses_normal.csv")))
+        .fold(("", List.empty[String])) {
+          case ((_, list), (row, state)) => (state, row :: list)
+        }
+        .mapAsync(parallelism = 5) {
+          case (state, rows) =>
+            Source.single("price;footage;baths;year;lot_size;beds")
+              .concat(Source(rows))
+              .map(line => ByteString(line + "\n"))
+              .runWith(FileIO.toPath(Paths.get(s"/home/martynas/Downloads/states/houses_normal_$state.csv")))
+        }
+        .mergeSubstreams
+        .runWith(Sink.foreach(println))
 
       complete.onComplete { res =>
         println(res)
@@ -224,8 +250,8 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
 }
 
 object ParseSpec {
-  case class Entity(price: Int, footage: Int, baths: Float, year: Int, lotSize: Float, beds: Int)
-  case class EntityNormal(price: Float, footage: Float, baths: Float, year: Float, lotSize: Float, beds: Float)
+  case class Entity(price: Int, footage: Int, baths: Float, year: Int, lotSize: Float, beds: Int, state: String)
+  case class EntityNormal(price: Float, footage: Float, baths: Float, year: Float, lotSize: Float, beds: Float, state: String)
 
   case class Boundaries(
     priceMin: Int = Int.MaxValue, priceMax: Int = Int.MinValue,
