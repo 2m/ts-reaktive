@@ -37,7 +37,10 @@ public class FoldProtocol {
                     
                     @Override
                     public Try<U> apply(E evt) {
+                        //System.out.println("before try");
                         Try<T> result = parentReader.apply(evt);
+                        //System.out.println("after try");
+                      //System.out.println(result);
                         if (result.isSuccess()) {
                             value = Option.some(combine.apply(value.getOrElse(initial), result.get()));
                             log.debug("Success, now {}", value);

@@ -36,7 +36,9 @@ public interface ReadProtocol<E,T> {
      * Checks whether the given Try indicates that no value was found (by being a failure of NoSuchElementException).
      */
     public static boolean isNone(Try<?> t) {
-        return t.isFailure() && t.failed().get() instanceof NoSuchElementException;
+        return t.isFailure() &&
+          (t.failed().get() instanceof NoSuchElementException ||
+            t.failed().get() instanceof ValidationException);
     }
     
     public abstract Reader<E,T> reader();
