@@ -12,11 +12,7 @@ import com.tradeshift.reaktive.marshal.Protocol;
 import com.tradeshift.reaktive.marshal.ReadProtocol;
 import com.tradeshift.reaktive.marshal.WriteProtocol;
 
-import javaslang.Function1;
-import javaslang.Function2;
-import javaslang.Function3;
-import javaslang.Tuple;
-import javaslang.Tuple2;
+import javaslang.*;
 import javaslang.collection.Vector;
 import javaslang.control.Option;
 
@@ -143,6 +139,16 @@ public class XMLProtocol {
     public static <F1,F2,F3,T> TagReadProtocol<T> tag(QName qname, ReadProtocol<XMLEvent,F1> p1, ReadProtocol<XMLEvent,F2> p2, ReadProtocol<XMLEvent,F3> p3, Function3<F1,F2,F3,T> f) {
         return new TagReadProtocol<>(Option.of(qname), Vector.of(p1, p2, p3), args -> f.apply((F1) args.get(0), (F2) args.get(1), (F3) args.get(2)));
     }
+
+  public static <F1,F2,F3,F4,T> TagReadProtocol<T> tag(QName qname, ReadProtocol<XMLEvent,F1> p1, ReadProtocol<XMLEvent,F2> p2, ReadProtocol<XMLEvent,F3> p3, ReadProtocol<XMLEvent,F4> p4, Function4<F1,F2,F3,F4,T> f) {
+    return new TagReadProtocol<>(Option.of(qname), Vector.of(p1, p2, p3, p4), args -> f.apply((F1) args.get(0), (F2) args.get(1), (F3) args.get(2), (F4) args.get(3)));
+  }
+
+  public static <F1,F2,F3,F4,F5,F6,T> TagReadProtocol<T> tag(QName qname, ReadProtocol<XMLEvent,F1> p1, ReadProtocol<XMLEvent,F2> p2, ReadProtocol<XMLEvent,F3> p3, ReadProtocol<XMLEvent,F4> p4, ReadProtocol<XMLEvent,F5> p5, ReadProtocol<XMLEvent,F6> p6, Function6<F1,F2,F3,F4,F5,F6,T> f) {
+    return new TagReadProtocol<>(Option.of(qname), Vector.of(p1, p2, p3, p4,p5,p6), args -> f.apply((F1) args.get(0), (F2) args.get(1), (F3) args.get(2), (F4) args.get(3), (F5) args.get(4), (F6) args.get(5)));
+  }
+
+
     /**
      * Writes a tag and child elements (tag or attribute) using [p*], getting values using [g*] for writing.
      */

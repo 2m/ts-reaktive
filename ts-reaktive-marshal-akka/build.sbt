@@ -28,6 +28,7 @@ libraryDependencies ++= {
     "org.xmlunit" % "xmlunit-core" % "2.2.1" % "test",
     "org.xmlunit" % "xmlunit-matchers" % "2.2.1" % "test",
     "com.github.tomakehurst" % "wiremock" % "1.58" % "test",
-    "org.scalatest" %% "scalatest" % "3.0.1" % "test"
+    "org.scalatest" %% "scalatest" % "3.0.1" % "test",
+    "org.scala-lang.modules" %% "scala-java8-compat" % "0.8.0"
   )
 }
