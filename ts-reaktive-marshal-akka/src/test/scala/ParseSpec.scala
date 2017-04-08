@@ -4,8 +4,8 @@ import java.util.concurrent.atomic.AtomicReference
 import javax.xml.stream.events.XMLEvent
 
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{FileIO, Sink, Source}
+import akka.stream.{ActorMaterializer, ClosedShape, FlowShape}
+import akka.stream.scaladsl.{Broadcast, FileIO, Flow, GraphDSL, Merge, RunnableGraph, Sink, Source, Zip, ZipN}
 import akka.util.ByteString
 import com.tradeshift.reaktive.marshal.{Protocol, StringMarshallable}
 import com.tradeshift.reaktive.marshal.stream.{AaltoReader, ProtocolReader}
@@ -18,8 +18,7 @@ import org.scalatest.{BeforeAndAfter, WordSpec}
 import scala.concurrent.duration._
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
-
-import javaslang.control.{ Option => JOption }
+import javaslang.control.{Option => JOption}
 
 import scala.compat.java8.OptionConverters._
 
@@ -44,62 +43,13 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
     def nowMillis = Duration(System.currentTimeMillis(), TimeUnit.MILLISECONDS)
     val started = nowMillis
 
-//    val proto = tag(qname("MedlineCitationSet"),
-//                    tag(qname("MedlineCitation"),
-//                      tag(qname("Article"),
-//                        tag(qname("ArticleTitle"), body))))
-
-    //val priceProto = tag(qname("int"), body).having(attribute("name"), "price")
-
-    val proto =
+    val priceProto =
       tag(qname("response"),
         tag(qname("result"),
           tag(qname("doc"),
             option(
               tag(qname("int"), body).having(attribute("name"), "price")
-            )/*,
-            option(
-              tag(qname("int"), body).having(attribute("name"), "square_footage")
-            )*/
-            /*option(
-              tag(qname("float"), body).having(attribute("name"), "total_baths")
-            ),
-            option(
-              tag(qname("int"), body).having(attribute("name"), "year_built")
-            ),
-            option(
-              tag(qname("float"), body).having(attribute("name"), "lot_size")
-            ),
-            option(
-              tag(qname("int"), body).having(attribute("name"), "beds")
-            ),*/
-//            new javaslang.Function6[JOption[String], JOption[String], JOption[String], JOption[String], JOption[String], JOption[String], Option[Entity]] {
-//              def apply(price: JOption[String], squareFootage: JOption[String], baths: JOption[String], yearBuilt: JOption[String], lotSize: JOption[String], beds: JOption[String]) = {
-//                for {
-//                  p <- price.toJavaOptional.asScala.map(_.toInt) if p > 10000
-//                  s <- squareFootage.toJavaOptional.asScala.map(_.toFloat)
-//                  b <- baths.toJavaOptional.asScala.map(_.toFloat)
-//                  y <- yearBuilt.toJavaOptional.asScala.map(_.toInt)
-//                  l <- lotSize.toJavaOptional.asScala.map(_.toFloat)
-//                  beds <- beds.toJavaOptional.asScala.map(_.toInt)
-//                } yield Entity(p, s, b, y, l, beds)
-//              }
-//            }
-//            new javaslang.Function2[JOption[String], JOption[String], Option[Entity]] {
-//              def apply(price: JOption[String], squareFootage: JOption[String]) = {
-//                for {
-//                  p <- price.toJavaOptional.asScala.map(_.toInt) if p > 10000
-//                  s <- squareFootage.toJavaOptional.asScala.map(_.toFloat)
-//                } yield Entity(p, s, 0, 0, 0, 0)
-//              }
-//            }
-            /*new javaslang.Function1[JOption[String], Option[Entity]] {
-              def apply(price: JOption[String]) = {
-                for {
-                  p <- price.toJavaOptional.asScala.map(_.toInt) if p > 10000
-                } yield Entity(p, 0, 0, 0, 0, 0)
-              }
-            }*/
+            )
           )
         )
       )
@@ -110,6 +60,50 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
           tag(qname("doc"),
             option(
               tag(qname("int"), body).having(attribute("name"), "square_footage")
+            )
+          )
+        )
+      )
+
+    val bathsProto =
+      tag(qname("response"),
+        tag(qname("result"),
+          tag(qname("doc"),
+            option(
+              tag(qname("float"), body).having(attribute("name"), "total_baths")
+            )
+          )
+        )
+      )
+
+    val yearProto =
+      tag(qname("response"),
+        tag(qname("result"),
+          tag(qname("doc"),
+            option(
+              tag(qname("int"), body).having(attribute("name"), "year_built")
+            )
+          )
+        )
+      )
+
+    val lotSizeProto =
+      tag(qname("response"),
+        tag(qname("result"),
+          tag(qname("doc"),
+            option(
+              tag(qname("float"), body).having(attribute("name"), "lot_size")
+            )
+          )
+        )
+      )
+
+    val bedsProto =
+      tag(qname("response"),
+        tag(qname("result"),
+          tag(qname("doc"),
+            option(
+              tag(qname("int"), body).having(attribute("name"), "beds")
             )
           )
         )
@@ -130,11 +124,31 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
 
       var bnd = Boundaries()
 
+      val parserFlow = Flow.fromGraph(GraphDSL.create() { implicit b =>
+        import GraphDSL.Implicits._
+
+        // prepare graph elements
+        val broadcast = b.add(Broadcast[XMLEvent](6))
+        val zip = b.add(ZipN[JOption[String]](6))
+
+        // connect the graph
+        broadcast.out(0) ~> ProtocolReader.of(priceProto) ~> zip.in(0)
+        broadcast.out(1) ~> ProtocolReader.of(footageProto) ~> zip.in(1)
+        broadcast.out(2) ~> ProtocolReader.of(bathsProto) ~> zip.in(2)
+        broadcast.out(3) ~> ProtocolReader.of(yearProto) ~> zip.in(3)
+        broadcast.out(4) ~> ProtocolReader.of(lotSizeProto) ~> zip.in(4)
+        broadcast.out(5) ~> ProtocolReader.of(bedsProto) ~> zip.in(5)
+
+        // expose ports
+        FlowShape(broadcast.in, zip.out)
+      })
+
       val parsed = FileIO.fromPath(Paths.get("/home/martynas/Downloads/export20170407.xml"), chunkSize = 8192 * 2)
         .via(AaltoReader.instance)
-        .via(ProtocolReader.of(proto))
+        .via(parserFlow)
         .mapConcat {
-          case e if e._1.isDefined && e._2.isDefined => Entity(e._1.get.toInt, e._2.get.toInt, 0, 0, 0, 0) :: Nil
+          case e if e.forall(_.isDefined) =>
+            Entity(e(0).get.toInt, e(1).get.toInt, e(2).get.toFloat, e(3).get.toInt, e(4).get.toFloat, e(5).get.toInt) :: Nil
           case e => Nil
         }
         .map { entity =>
@@ -210,7 +224,7 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
 }
 
 object ParseSpec {
-  case class Entity(price: Int, footage: Float, baths: Float, year: Int, lotSize: Float, beds: Int)
+  case class Entity(price: Int, footage: Int, baths: Float, year: Int, lotSize: Float, beds: Int)
   case class EntityNormal(price: Float, footage: Float, baths: Float, year: Float, lotSize: Float, beds: Float)
 
   case class Boundaries(
