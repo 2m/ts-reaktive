@@ -19,6 +19,8 @@ import scala.concurrent.ExecutionContext.Implicits.global
 
 class ParseSpec extends WordSpec with BeforeAndAfter {
 
+  import ParseSpec._
+
   val config = ConfigFactory.parseString(
     """
       |akka.loglevel = DEBUG
@@ -54,57 +56,12 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
         )
       )
 
+    def printSink[T]() = Sink.fold[T](0) { (c, el) =>
+      if (c % 50000 == 0) println(c, nowMillis - started)
+      c + 1
+    }
+
     "should parse" in {
-
-      def parseFrom(num: Int) = {
-        FileIO.fromPath(Paths.get("/home/martynas/Downloads/export20170407.xml"), chunkSize = 8192 * 2)
-          .via(new AaltoReader)
-          .statefulMapConcat(() => {
-            var count = 0
-            var drop = true
-            var startDocSaved = false
-            var startDocEmitted = false
-            var preamble: List[XMLEvent] = Nil
-
-            (el) => {
-              if (!(el.isStartElement && el.asStartElement.getName.toString == "doc")) {
-                if (!startDocSaved) {
-                  preamble = el :: preamble
-                }
-              } else {
-                startDocSaved = true
-              }
-
-              if (!drop) {
-                if (startDocEmitted) {
-                  el :: Nil
-                } else {
-                  if (el.isStartElement) {
-                    println(s"will stop dropping stuff")
-                    startDocEmitted = true
-                    preamble.reverse :+ el
-                  } else {
-                    println("skipping until first start of an element")
-                    Nil
-                  }
-                }
-              } else {
-                if (el.isEndElement && el.asEndElement().getName.toString == "doc") {
-                  count += 1
-                }
-
-                if (count >= num) {
-                  drop = false
-                }
-
-                Nil
-              }
-            }
-          })
-      }
-
-      def elementsFrom(n: Int) =
-        parseFrom(n).via(ProtocolReader.of(proto))
 
       def printXmlEvent(e: XMLEvent) = e match {
         case e if e.isStartElement => s"Start: ${e.asStartElement.getName}"
@@ -113,24 +70,14 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
       }
 
       val res =
-        //elementsFrom(0).take(100000)
-        //.merge(elementsFrom(100000).take(100000))
-        //.merge(elementsFrom(200000).take(100000))
         FileIO.fromPath(Paths.get("/home/martynas/Downloads/export20170407.xml"), chunkSize = 8192 * 2)
         .via(AaltoReader.instance)
-        //parseFrom(0)
-        //.log("Element", printXmlEvent)
         .via(ProtocolReader.of(proto))
-        //.take(10)
-        //.log("Price")
-        .runWith(Sink.fold(0) { (c, el) =>
-          if (c % 50000 == 0) println(c, nowMillis - started)
-          c + 1
-        })
+        .mapConcat(_.toList)
+        .runWith(printSink)
 
       res.onComplete { count =>
         println(count)
-        //println(count.failed.get.printStackTrace())
         println(nowMillis - started)
       }
 
@@ -138,4 +85,8 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
     }
   }
 
+}
+
+object ParseSpec {
+  case class Entity(price: Int)
 }
