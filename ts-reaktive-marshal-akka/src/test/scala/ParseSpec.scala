@@ -125,6 +125,17 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
       c + 1
     }
 
+    def logCount[T](prefix: String) = () => {
+      var count = 0
+      (el: T) => {
+        count += 1
+        if (count % 20000 == 0) {
+          println(s"$prefix: $count in ${(nowMillis - started).toSeconds}s")
+        }
+        el :: Nil
+      }
+    }
+
     "should parse" in {
 
       def printXmlEvent(e: XMLEvent) = e match {
@@ -164,63 +175,12 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
           case e => Nil
         }
         .groupBy(100, _.state)
-        .map { entity =>
-          if (entity.price > bnd.priceMax) {
-            bnd = bnd.copy(priceMax = entity.price)
-          }
-          if (entity.price < bnd.priceMin) {
-            bnd = bnd.copy(priceMin = entity.price)
-          }
-          if (entity.footage > bnd.footageMax) {
-            bnd = bnd.copy(footageMax = entity.footage)
-          }
-          if (entity.footage < bnd.footageMin) {
-            bnd = bnd.copy(footageMin = entity.footage)
-          }
-          if (entity.baths > bnd.bathsMax) {
-            bnd = bnd.copy(bathsMax = entity.baths)
-          }
-          if (entity.baths < bnd.bathsMin) {
-            bnd = bnd.copy(bathsMin = entity.baths)
-          }
-          if (entity.year > bnd.yearMax) {
-            bnd = bnd.copy(yearMax = entity.year)
-          }
-          if (entity.year < bnd.yearMin) {
-            bnd = bnd.copy(yearMin = entity.year)
-          }
-          if (entity.lotSize > bnd.lotSizeMax) {
-            bnd = bnd.copy(lotSizeMax = entity.lotSize)
-          }
-          if (entity.lotSize < bnd.lotSizeMin) {
-            bnd = bnd.copy(lotSizeMin = entity.lotSize)
-          }
-          if (entity.beds > bnd.bedsMax) {
-            bnd = bnd.copy(bedsMax = entity.beds)
-          }
-          if (entity.beds < bnd.bedsMin) {
-            bnd = bnd.copy(bedsMin = entity.beds)
-          }
-          entity
-        }
         .mergeSubstreams
-        //.take(60000)
+        .statefulMapConcat(logCount("Parsed"))
         .runWith(Sink.seq)
 
-      val allrows = Await.result(parsed, Duration.Inf)
-
-      val complete = Source(allrows)
-        .map { entity =>
-          EntityNormal(
-            (entity.price - bnd.priceMin) / bnd.priceMax.toFloat,
-            (entity.footage - bnd.footageMin) / bnd.footageMax,
-            (entity.baths - bnd.bathsMin) / bnd.bathsMax,
-            (entity.year - bnd.yearMin) / bnd.yearMax.toFloat,
-            (entity.lotSize - bnd.lotSizeMin) / bnd.lotSizeMax,
-            (entity.beds - bnd.bedsMin) / bnd.bedsMax.toFloat,
-            entity.state
-          )
-        }
+      val complete = Source.fromFuture(parsed)
+        .mapConcat(rows => rows)
         .groupBy(100, _.state)
         .map { e =>
           (f"${e.price}%f;${e.footage}%f;${e.baths}%f;${e.year}%f;${e.lotSize}%f;${e.beds}%f", e.state)
@@ -233,7 +193,7 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
             Source.single("price;footage;baths;year;lot_size;beds")
               .concat(Source(rows))
               .map(line => ByteString(line + "\n"))
-              .runWith(FileIO.toPath(Paths.get(s"/home/martynas/Downloads/states/houses_normal_$state.csv")))
+              .runWith(FileIO.toPath(Paths.get(s"/home/martynas/Downloads/states/houses_raw_$state.csv")))
         }
         .mergeSubstreams
         .runWith(Sink.foreach(println))
