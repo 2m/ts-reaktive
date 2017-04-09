@@ -174,9 +174,10 @@ class ParseSpec extends WordSpec with BeforeAndAfter {
             Entity(e(0).get.toInt, e(1).get.toInt, e(2).get.toFloat, e(3).get.toInt, e(4).get.toFloat, e(5).get.toInt, e(6).get) :: Nil
           case e => Nil
         }
+        .filter(_.price >= 20000)
         .groupBy(100, _.state)
         .mergeSubstreams
-        .statefulMapConcat(logCount("Parsed"))
+        //.statefulMapConcat(logCount("Parsed"))
         .runWith(Sink.seq)
 
       val complete = Source.fromFuture(parsed)
